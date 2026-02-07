@@ -1,3 +1,5 @@
+// ==================== CLIENT OPTIONS ====================
+
 export interface ClientOptions {
 	host: string;
 	port: number;
@@ -9,7 +11,15 @@ export interface ClientOptions {
 	skinData?: Record<string, unknown>;
 	deviceOS?: number;
 	gameVersion?: string;
+	/** Auto-reconnect on unexpected disconnect. Default: false */
+	autoReconnect?: boolean;
+	/** Max auto-reconnect attempts. Default: 3 */
+	maxReconnectAttempts?: number;
+	/** Base delay between reconnect attempts in ms. Default: 3000 */
+	reconnectDelay?: number;
 }
+
+// ==================== PLAYER ====================
 
 export interface PlayerProfile {
 	name: string;
@@ -33,11 +43,20 @@ export interface PlayerData {
 	worldGamemode: number;
 }
 
+// ==================== GEOMETRY ====================
+
 export interface Vector3 {
 	x: number;
 	y: number;
 	z: number;
 }
+
+export interface Vector2 {
+	x: number;
+	y: number;
+}
+
+// ==================== ENUMS ====================
 
 export enum ClientStatus {
 	Disconnected = 0,
@@ -48,13 +67,10 @@ export enum ClientStatus {
 	Spawned = 5,
 }
 
-// ResourcePackResponse is exported from @serenityjs/protocol:
-// None = 0, Refused = 1, SendPacks = 2, HaveAllPacks = 3, Completed = 4
+// ==================== CONSTANTS ====================
 
 export const GAME_BYTE = 0xfe;
-
 export const RAKNET_MAGIC = Buffer.from('00ffff00fefefefefdfdfdfd12345678', 'hex');
-
 export const MOJANG_PUBLIC_KEY =
 	'MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAECRXueJeTDqNRRgJi/vlRufByu/2G0i2Ebt6YMar5QX/R0DIIyrJMcUpruK4QveTfJSTp3Shlq4Gk34cD/4GUWwkv0DVuzeuB+tXija7HBxii03NHDbPAD0AKnLr2wdAp';
 
@@ -62,12 +78,11 @@ export const DEFAULT_PROTOCOL_VERSION = 685;
 export const DEFAULT_GAME_VERSION = '1.21.1.03';
 export const DEFAULT_VIEW_DISTANCE = 10;
 export const CLIENT_TICK_RATE = 20;
+export const TICK_MS = 1000 / CLIENT_TICK_RATE;
 export const RAKNET_TPS = 100;
 
-/**
- * Map of all known Bedrock protocol packet IDs to human-readable names.
- * Use `getPacketName(id)` for quick lookups.
- */
+// ==================== PACKET NAMES ====================
+
 export const PACKET_NAMES: Record<number, string> = {
 	1: 'Login',
 	2: 'PlayStatus',
@@ -145,9 +160,7 @@ export const PACKET_NAMES: Record<number, string> = {
 	308: 'SetHud',
 };
 
-/**
- * Gets the human-readable name for a packet ID, or a hex fallback.
- */
+/** Gets the human-readable name for a packet ID, or a hex fallback. */
 export function getPacketName(id: number): string {
 	return PACKET_NAMES[id] ?? `Unknown(0x${id.toString(16).padStart(2, '0')})`;
 }
