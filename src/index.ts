@@ -1,17 +1,30 @@
+// ==================== Core ====================
 export { Client } from './Client';
 export { FrameManager } from './FrameManager';
 export { Queue } from './Queue';
 export { handleGamePacket, decodeGamePackets, readPacketId } from './handlers';
+
+// ==================== Auth ====================
+export { authenticate, generateKeyPair, buildSkinData, generateSkinImage } from './auth';
+export type { AuthResult, KeyPair } from './auth';
+
+// ==================== World ====================
+export { EntityTracker, PlayerState } from './world';
+export type { TrackedEntity, AttributeValue } from './world';
+
+// ==================== Types ====================
 export * from './types';
 
+// ==================== Factory ====================
 import { Client } from './Client';
 import type { ClientOptions } from './types';
 
 /**
- * Creates a new Bedrock client and connects it to the server.
- * This is the easiest way to get started.
+ * Creates a new Bedrock client and connects to the server.
+ * The easiest way to get started.
  *
  * @example
+ * ```ts
  * import { createClient } from 'bedrock-client';
  *
  * const client = await createClient({
@@ -24,6 +37,7 @@ import type { ClientOptions } from './types';
  * client.on('spawn', () => {
  *   client.chat('Hello world!');
  * });
+ * ```
  */
 export async function createClient(options: ClientOptions): Promise<Client> {
 	const client = new Client(options);
@@ -32,11 +46,11 @@ export async function createClient(options: ClientOptions): Promise<Client> {
 }
 
 // ============================================================================
-//  EXAMPLES — Run with: npm run dev
+//  EXAMPLES
 // ============================================================================
 
 // --------------------------------------------------
-// Example 1: Basic bot that joins and chats
+// Example 1: Basic bot that joins, chats, and tracks health
 // --------------------------------------------------
 async function basicBot() {
 	const client = new Client({
@@ -45,41 +59,75 @@ async function basicBot() {
 		offline: true,
 		username: 'Bot',
 		viewDistance: 10,
+		autoReconnect: true, // auto-reconnect on disconnect
 	});
 
 	client.on('spawn', () => {
-		client.logger.info('Spawned! Sending hello message...');
 		client.setInitialized();
 		client.chat('Hello from BedrockClient!');
+
+		// Health/hunger are auto-tracked
+		client.logger.info(`Health: ${client.state.health}/${client.state.maxHealth}`);
+		client.logger.info(`Hunger: ${client.state.hunger}`);
 	});
 
 	client.on('text', (data) => {
 		client.logger.info(`[Chat] <${data.source}> ${data.message}`);
-
-		// Echo bot: reply to messages
 		if (data.source !== client.profile.name && data.message.startsWith('!echo ')) {
 			client.chat(data.message.slice(6));
 		}
 	});
 
-	client.on('kick', (reason) => {
-		client.logger.warn(`Kicked: ${reason}`);
+	// Health changes are auto-tracked via UpdateAttributes
+	client.on('update_attributes', () => {
+		if (!client.state.isAlive) {
+			client.logger.warn('Player died!');
+		}
 	});
 
-	client.on('disconnect', (reason) => {
-		client.logger.info(`Disconnected: ${reason}`);
-		process.exit(0);
-	});
-
-	client.on('error', (error) => {
-		client.logger.error('Client error:', error);
-	});
+	client.on('kick', (reason) => client.logger.warn(`Kicked: ${reason}`));
+	client.on('disconnect', (reason) => client.logger.info(`Disconnected: ${reason}`));
+	client.on('reconnect', (attempt) => client.logger.info(`Reconnected (attempt ${attempt})`));
 
 	await client.connect();
 }
 
 // --------------------------------------------------
-// Example 2: Log ALL packet IDs and names
+// Example 2: Entity tracker
+// --------------------------------------------------
+async function entityTracker() {
+	const client = await createClient({
+		host: '127.0.0.1',
+		port: 19132,
+		offline: true,
+		username: 'EntityWatcher',
+	});
+
+	client.on('spawn', () => {
+		client.setInitialized();
+
+		// Print entity stats every 10 seconds
+		setInterval(() => {
+			const players = client.entities.getPlayers();
+			client.logger.info(`Tracking ${client.entities.count} entities (${players.length} players)`);
+
+			for (const player of players) {
+				client.logger.info(`  Player: ${player.username} at (${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)})`);
+			}
+
+			// Find nearest entity
+			if (client.playerData) {
+				const nearest = client.entities.nearest(client.playerData.position);
+				if (nearest) {
+					client.logger.info(`  Nearest: ${nearest.type} (runtime=${nearest.runtimeId})`);
+				}
+			}
+		}, 10_000);
+	});
+}
+
+// --------------------------------------------------
+// Example 3: Packet logger with stats
 // --------------------------------------------------
 async function packetLogger() {
 	const client = new Client({
@@ -89,86 +137,7 @@ async function packetLogger() {
 		username: 'PacketSniffer',
 	});
 
-	// Enable built-in packet logging (logs every packet with ID, name, and size)
 	const stopLogging = client.enablePacketLogging();
-	// Call stopLogging() later to disable
-
-	client.on('spawn', () => {
-		client.setInitialized();
-		client.logger.info('=== Now logging all packets ===');
-
-		// Stop logging after 30 seconds
-		setTimeout(() => {
-			stopLogging();
-			client.logger.info('=== Packet logging stopped ===');
-		}, 30_000);
-	});
-
-	await client.connect();
-}
-
-// --------------------------------------------------
-// Example 3: Custom packet capture with filtering
-// --------------------------------------------------
-async function packetCapture() {
-	const client = new Client({
-		host: '127.0.0.1',
-		port: 19132,
-		offline: true,
-		username: 'Watcher',
-	});
-
-	// Listen to the raw 'packet' event — every game packet triggers this
-	client.on('packet', (pkt) => {
-		// pkt.id   = numeric packet ID (e.g. 9)
-		// pkt.name = human-readable name (e.g. "Text")
-		// pkt.buffer = raw packet buffer
-		console.log(`[PACKET] ${pkt.name} (0x${pkt.id.toString(16)}) — ${pkt.buffer.length} bytes`);
-	});
-
-	// Or filter for specific packets using onPacket() — by name or ID:
-
-	// By name:
-	const offText = client.onPacket('Text', (pkt) => {
-		console.log(`Text packet received! ${pkt.buffer.length} bytes`);
-	});
-
-	// By ID (MovePlayer = 19 = 0x13):
-	const offMove = client.onPacket(19, (pkt) => {
-		console.log(`MovePlayer packet! ${pkt.buffer.length} bytes`);
-	});
-
-	// waitForPacket() — waits for ONE specific packet, with optional timeout:
-	client.on('spawn', async () => {
-		client.setInitialized();
-
-		// Wait for a Text packet within 60 seconds
-		try {
-			const textPkt = await client.waitForPacket('Text', 60_000);
-			console.log(`Got first Text packet after spawn! ID=${textPkt.id}`);
-		} catch (e) {
-			console.log('No Text packet received within timeout');
-		}
-
-		// Clean up specific listeners when done
-		offText();
-		offMove();
-	});
-
-	await client.connect();
-}
-
-// --------------------------------------------------
-// Example 4: Packet counter / stats
-// --------------------------------------------------
-async function packetStats() {
-	const client = new Client({
-		host: '127.0.0.1',
-		port: 19132,
-		offline: true,
-		username: 'Stats',
-	});
-
 	const packetCounts = new Map<string, number>();
 
 	client.on('packet', (pkt) => {
@@ -178,45 +147,28 @@ async function packetStats() {
 	client.on('spawn', () => {
 		client.setInitialized();
 
-		// Print packet stats every 10 seconds
+		// Print stats every 10 seconds
 		setInterval(() => {
-			console.log('\n=== Packet Stats ===');
 			const sorted = [...packetCounts.entries()].sort((a, b) => b[1] - a[1]);
-			for (const [name, count] of sorted) {
+			console.log('\n=== Packet Stats ===');
+			for (const [name, count] of sorted.slice(0, 10)) {
 				console.log(`  ${name}: ${count}`);
 			}
-			console.log(`  TOTAL: ${sorted.reduce((sum, [, c]) => sum + c, 0)}`);
 		}, 10_000);
+
+		// Stop logging after 30 seconds
+		setTimeout(() => {
+			stopLogging();
+			console.log('=== Logging stopped ===');
+		}, 30_000);
 	});
 
 	await client.connect();
 }
 
 // --------------------------------------------------
-// Example 5: Using getPacketName() for manual lookup
-// --------------------------------------------------
-function packetNameLookup() {
-	const { getPacketName, PACKET_NAMES } = require('./types');
-
-	// Look up a single ID
-	console.log(getPacketName(9)); // "Text"
-	console.log(getPacketName(11)); // "StartGame"
-	console.log(getPacketName(999)); // "Unknown(0x3e7)"
-
-	// Print all known packets
-	console.log('\nAll known packets:');
-	for (const [id, name] of Object.entries(PACKET_NAMES)) {
-		console.log(`  0x${Number(id).toString(16).padStart(2, '0')} (${id}) = ${name}`);
-	}
-}
-
-// --------------------------------------------------
 // Run one of the examples:
 // --------------------------------------------------
 basicBot();
-
-// Uncomment any of these to try different examples:
+// entityTracker();
 // packetLogger();
-// packetCapture();
-// packetStats();
-// packetNameLookup();
