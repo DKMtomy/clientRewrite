@@ -54,7 +54,7 @@ import {
 import { inflateRawSync } from 'zlib';
 import { ResourcePackResponse } from '@serenityjs/protocol';
 import type { Client } from '@/Client';
-import { ClientStatus } from '@/types';
+import { ClientStatus, getPacketName } from '@/types';
 
 type PacketDeserializer = (buffer: Buffer, client: Client) => void;
 
@@ -419,19 +419,14 @@ registerHandler(ProtocolPacket.ItemComponent, (buffer, client) => {
 });
 
 /**
- * Processes a decoded game packet buffer and routes it to the correct handler.
- * The buffer should start with the packet header (VarInt packet ID).
+ * Reads a VarInt-encoded packet ID from a buffer, stripping sub-client bits.
  */
-export function handleGamePacket(buffer: Buffer, client: Client): void {
-	if (buffer.length < 1) return;
-
-	// Read the packet ID - it's a VarInt but the protocol uses the raw byte value
-	// The actual packet ID is in the lower bits (first 1-2 bytes as VarInt)
+export function readPacketId(buffer: Buffer): number {
 	let packetId = 0;
 	let shift = 0;
 	let cursor = 0;
 	do {
-		if (cursor >= buffer.length) return;
+		if (cursor >= buffer.length) return -1;
 		const byte = buffer[cursor]!;
 		packetId |= (byte & 0x7f) << shift;
 		shift += 7;
@@ -440,19 +435,32 @@ export function handleGamePacket(buffer: Buffer, client: Client): void {
 	} while (shift < 35);
 
 	// Strip sender/target sub-client IDs (upper bits)
-	packetId = packetId & 0x3ff;
+	return packetId & 0x3ff;
+}
+
+/**
+ * Processes a decoded game packet buffer and routes it to the correct handler.
+ * The buffer should start with the packet header (VarInt packet ID).
+ */
+export function handleGamePacket(buffer: Buffer, client: Client): void {
+	if (buffer.length < 1) return;
+
+	const packetId = readPacketId(buffer);
+	if (packetId === -1) return;
+
+	const name = getPacketName(packetId);
 
 	const handler = handlers.get(packetId);
 	if (handler) {
 		try {
 			handler(buffer, client);
 		} catch (error) {
-			client.logger.error(`Error handling packet 0x${packetId.toString(16).padStart(2, '0')}: ${error}`);
+			client.logger.error(`Error handling packet ${name} (0x${packetId.toString(16).padStart(2, '0')}): ${error}`);
 		}
 	}
 
-	// Emit raw packet event for custom handling
-	client.emit('packet', { id: packetId, buffer });
+	// Emit raw packet event for custom handling - includes id, name, and raw buffer
+	client.emit('packet', { id: packetId, name, buffer });
 }
 
 /**

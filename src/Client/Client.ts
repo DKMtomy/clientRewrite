@@ -45,6 +45,8 @@ import {
 	DEFAULT_GAME_VERSION,
 	DEFAULT_VIEW_DISTANCE,
 	CLIENT_TICK_RATE,
+	getPacketName,
+	PACKET_NAMES,
 } from '@/types';
 
 class Client extends EventEmitter {
@@ -272,6 +274,109 @@ class Client extends EventEmitter {
 	 */
 	public getTick(): bigint {
 		return this.tickCount;
+	}
+
+	/**
+	 * Listens for a specific packet by ID or name.
+	 * Returns a cleanup function to remove the listener.
+	 *
+	 * @example
+	 * // By packet ID
+	 * const off = client.onPacket(9, (data) => console.log('Text packet:', data));
+	 * // By name
+	 * const off = client.onPacket('Text', (data) => console.log('Text packet:', data));
+	 * // Later: off() to stop listening
+	 */
+	public onPacket(
+		idOrName: number | string,
+		callback: (data: { id: number; name: string; buffer: Buffer }) => void,
+	): () => void {
+		const targetId = typeof idOrName === 'string' ? this.resolvePacketName(idOrName) : idOrName;
+
+		const handler = (data: { id: number; name: string; buffer: Buffer }) => {
+			if (data.id === targetId) callback(data);
+		};
+
+		this.on('packet', handler);
+		return () => this.off('packet', handler);
+	}
+
+	/**
+	 * Waits for a specific packet to arrive. Resolves with the packet data.
+	 * Optionally accepts a timeout in milliseconds.
+	 *
+	 * @example
+	 * const startGame = await client.waitForPacket('StartGame', 30000);
+	 * console.log('Game started!', startGame);
+	 */
+	public waitForPacket(
+		idOrName: number | string,
+		timeoutMs?: number,
+	): Promise<{ id: number; name: string; buffer: Buffer }> {
+		return new Promise((resolve, reject) => {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const off = this.onPacket(idOrName, (data) => {
+				if (timer) clearTimeout(timer);
+				off();
+				resolve(data);
+			});
+
+			if (timeoutMs) {
+				timer = setTimeout(() => {
+					off();
+					reject(new Error(`Timed out waiting for packet ${idOrName} after ${timeoutMs}ms`));
+				}, timeoutMs);
+			}
+		});
+	}
+
+	/**
+	 * Enables logging of ALL incoming packet IDs and names.
+	 * Returns a cleanup function to stop logging.
+	 *
+	 * @example
+	 * const stopLogging = client.enablePacketLogging();
+	 * // ... packets get logged ...
+	 * stopLogging(); // disable
+	 */
+	public enablePacketLogging(): () => void {
+		const handler = (data: { id: number; name: string; buffer: Buffer }) => {
+			this.logger.info(`[PKT] 0x${data.id.toString(16).padStart(2, '0')} ${data.name} (${data.buffer.length} bytes)`);
+		};
+		this.on('packet', handler);
+		return () => this.off('packet', handler);
+	}
+
+	/**
+	 * Returns the human-readable name for a packet ID.
+	 */
+	public getPacketName(id: number): string {
+		return getPacketName(id);
+	}
+
+	/**
+	 * Returns true if the client is fully spawned and ready to interact.
+	 */
+	public get isSpawned(): boolean {
+		return this.status === ClientStatus.Spawned;
+	}
+
+	/**
+	 * Returns true if the client has an active connection (any state past Disconnected).
+	 */
+	public get isConnected(): boolean {
+		return this.status >= ClientStatus.Connected;
+	}
+
+	/**
+	 * Resolves a packet name string to its numeric ID.
+	 */
+	private resolvePacketName(name: string): number {
+		const lower = name.toLowerCase();
+		for (const [id, pktName] of Object.entries(PACKET_NAMES)) {
+			if (pktName.toLowerCase() === lower) return Number(id);
+		}
+		return -1;
 	}
 
 	// ==================== LOGIN FLOW ====================
