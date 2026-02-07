@@ -1,13 +1,14 @@
 {
-	"name": "protocol",
-	"version": "1.0.0",
-	"description": "",
-	"main": "index.js",
+	"name": "bedrock-client",
+	"version": "2.0.0",
+	"description": "A RakNet client for Minecraft Bedrock Edition",
+	"main": "dist/index.js",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1",
-		"dev": "tsc && node dist/index.js"
+		"build": "tsc",
+		"dev": "tsc && node dist/index.js",
+		"start": "node dist/index.js"
 	},
-	"keywords": [],
+	"keywords": ["minecraft", "bedrock", "raknet", "client", "protocol"],
 	"author": "",
 	"license": "ISC",
 	"dependencies": {
@@ -16,14 +17,14 @@
 		"@serenityjs/logger": "^0.3.2",
 		"@serenityjs/protocol": "^0.3.0",
 		"@serenityjs/raknet": "^0.3.5",
+		"jsonwebtoken": "^9.0.2",
 		"prismarine-auth": "^2.5.0",
-		"ts-node": "^10.9.2",
-		"typescript": "^5.4.5",
 		"uuid-1345": "^1.0.2"
 	},
 	"devDependencies": {
 		"@types/jsonwebtoken": "^9.0.6",
 		"@types/node": "^20.14.2",
-		"@types/uuid-1345": "^0.99.25"
+		"@types/uuid-1345": "^0.99.25",
+		"typescript": "^5.4.5"
 	}
 }

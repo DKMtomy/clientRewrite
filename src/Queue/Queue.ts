@@ -20,16 +20,13 @@ export class Queue {
 
 	/**
 	 * Sends a frame to the connection.
-	 *
-	 * @param frame - The frame to send
-	 * @param priority - The priority of the frame
+	 * Handles sequencing, ordering, reliability indexing, and fragmentation.
 	 */
 	public sendFrame(frame: Frame, priority: Priority): void {
 		if (frame.isSequenced()) {
 			frame.orderIndex = this.outputOrderIndex[frame.orderChannel] as number;
 			frame.sequenceIndex = (this.outputSequenceIndex[frame.orderChannel] as number)++;
 		} else if (frame.isOrderExclusive()) {
-			// Set the order index and the sequence index
 			frame.orderIndex = (this.outputOrderIndex[frame.orderChannel] as number)++;
 			this.outputSequenceIndex[frame.orderChannel] = 0;
 		}
@@ -40,23 +37,24 @@ export class Queue {
 		// Split packet if bigger than MTU size
 		const maxSize = this.mtu - 6 - 23;
 		if (frame.payload.byteLength > maxSize) {
-			// Create a new buffer from the payload and generate a fragment id
 			const buffer = Buffer.from(frame.payload);
 			const fragmentId = this.outputFragmentIndex++ % 65_536;
+			const fragmentSize = Math.ceil(buffer.byteLength / maxSize);
 
-			// Loop through the buffer and split it into fragments based on the MTU size
 			for (let index = 0; index < buffer.byteLength; index += maxSize) {
-				// Check if the index is not 0, if so, set the reliable index
 				if (index !== 0) frame.reliableIndex = this.outputReliableIndex++;
 
-				// Create a new frame and assign the values
-				frame.payload = buffer.subarray(index, index + maxSize);
-				frame.fragmentIndex = index / maxSize;
-				frame.fragmentId = fragmentId;
-				frame.fragmentSize = Math.ceil(buffer.byteLength / maxSize);
+				const fragmentFrame = new Frame();
+				fragmentFrame.reliability = frame.reliability;
+				fragmentFrame.orderChannel = frame.orderChannel;
+				fragmentFrame.orderIndex = frame.orderIndex;
+				fragmentFrame.reliableIndex = frame.reliableIndex;
+				fragmentFrame.payload = buffer.subarray(index, index + maxSize);
+				fragmentFrame.fragmentIndex = index / maxSize;
+				fragmentFrame.fragmentId = fragmentId;
+				fragmentFrame.fragmentSize = fragmentSize;
 
-				// Add the frame to the queue
-				this.addFrameToQueue(frame, priority || Priority.Normal);
+				this.addFrameToQueue(fragmentFrame, priority || Priority.Normal);
 			}
 		} else {
 			return this.addFrameToQueue(frame, priority);
@@ -65,54 +63,44 @@ export class Queue {
 
 	private addFrameToQueue(frame: Frame, priority: Priority): void {
 		let length = 4;
-		// Add the length of the frame to the length
 		for (const queuedFrame of this.outputFrameQueue.frames) {
 			length += queuedFrame.getByteLength();
 		}
 
-		// Check if the frame is bigger than the MTU, if so, send the queue
+		// Flush if adding this frame would exceed MTU
 		if (length + frame.getByteLength() > this.mtu - 36) {
 			this.sendFrameQueue();
 		}
 
-		// Add the frame to the queue
 		this.outputFrameQueue.frames.push(frame);
 
-		// If the priority is immediate, send the queue
+		// Immediate priority flushes right away
 		if (priority === Priority.Immediate) return this.sendFrameQueue();
 	}
 
 	/**
-	 * Sends the output frame queue
+	 * Flushes the output frame queue. Called on each tick and on immediate priority sends.
 	 */
 	public sendFrameQueue(): void {
-		// Check if the queue is empty
 		if (this.outputFrameQueue.frames.length > 0) {
-			// Set the sequence of the frame set
 			this.outputFrameQueue.sequence = this.outputSequence++;
-
-			// Send the frame set
 			this.sendFrameSet(this.outputFrameQueue);
 
-			// Set the queue to a new frame set
 			this.outputFrameQueue = new FrameSet();
 			this.outputFrameQueue.frames = [];
 		}
 	}
 
 	/**
-	 * Sends a frame set to the connection
-	 * @param frameset The frame set
+	 * Sends a frame set to the connection and backs up reliable frames.
 	 */
 	private sendFrameSet(frameset: FrameSet): void {
 		this.client.send(frameset.serialize());
 
-		frameset.frames.forEach((frame) => {
-			if (frame.payload[0] !== 3) console.log('Sending Header ' + frame.payload[0]);
-		});
-		this.outputBackupQueue.set(
-			frameset.sequence,
-			frameset.frames.filter((frame) => frame.isReliable()),
-		);
+		// Backup reliable frames for potential retransmission on NACK
+		const reliableFrames = frameset.frames.filter((frame) => frame.isReliable());
+		if (reliableFrames.length > 0) {
+			this.outputBackupQueue.set(frameset.sequence, reliableFrames);
+		}
 	}
 }
